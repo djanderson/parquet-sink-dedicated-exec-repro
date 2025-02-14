@@ -1,3 +1,7 @@
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
 use arrow::array as arrow_array;
 use datafusion::common::record_batch;
 use datafusion::datasource::file_format::parquet::ParquetSink;
@@ -12,11 +16,15 @@ use datafusion::prelude::SessionContext;
 mod dedicated_executor;
 
 use dedicated_executor::DedicatedExecutorBuilder;
+use object_store::ObjectStore;
 
 #[tokio::main]
 async fn main() {
     let exec = DedicatedExecutorBuilder::new().build();
-    let store = dedicated_executor::MockStore::create().await;
+    let store_prefix = Path::new("data");
+    fs::create_dir(store_prefix).unwrap();
+    let store: Arc<dyn ObjectStore> =
+        Arc::new(object_store::local::LocalFileSystem::new_with_prefix(store_prefix).unwrap());
     let store = exec.wrap_object_store_for_io(store);
 
     let batch = record_batch!(("col", Int32, vec![1, 2, 3])).unwrap();

@@ -9,7 +9,8 @@ arrow-schema = "54.1.0"
 async-trait = "0.1.86"
 bytes = "1.10.0"
 datafusion = "45.0.0"
+dotenvy = "0.15.7"
 futures = "0.3.31"
-object_store = "0.11.2"
+object_store = { version = "0.11.2", features = ["aws"] }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-stream = "0.1.17"

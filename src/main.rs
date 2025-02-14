@@ -1,5 +1,3 @@
-use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 
 use arrow::array as arrow_array;
@@ -12,19 +10,28 @@ use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::prelude::SessionContext;
+use dotenvy::dotenv;
+use object_store::aws::AmazonS3Builder;
+use object_store::ObjectStore;
+
+use crate::dedicated_executor::DedicatedExecutorBuilder;
 
 mod dedicated_executor;
 
-use dedicated_executor::DedicatedExecutorBuilder;
-use object_store::ObjectStore;
-
 #[tokio::main]
 async fn main() {
+    dotenv().unwrap();
     let exec = DedicatedExecutorBuilder::new().build();
-    let store_prefix = Path::new("data");
-    fs::create_dir(store_prefix).unwrap();
-    let store: Arc<dyn ObjectStore> =
-        Arc::new(object_store::local::LocalFileSystem::new_with_prefix(store_prefix).unwrap());
+    let store: Arc<dyn ObjectStore> = Arc::new(
+        AmazonS3Builder::new()
+            .with_endpoint(format!("http://localhost:9000"))
+            .with_allow_http(true)
+            .with_bucket_name(env("BUCKET_NAME"))
+            .with_access_key_id(env("ACCESS_KEY"))
+            .with_secret_access_key(env("SECRET_KEY"))
+            .build()
+            .unwrap(),
+    );
     let store = exec.wrap_object_store_for_io(store);
 
     let batch = record_batch!(("col", Int32, vec![1, 2, 3])).unwrap();
@@ -59,4 +66,9 @@ async fn main() {
     exec.join().await;
 
     println!("Test completed successfully.");
+}
+
+// Get an env var or panic.
+fn env(var: &str) -> String {
+    std::env::var(var).expect(&format!("{var} env var must be set"))
 }

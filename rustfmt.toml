@@ -1,0 +1,6 @@
+# https://github.com/brotzeit/rustic?tab=readme-ov-file#edition-2018
+edition = "2021"
+
+# Imports
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"

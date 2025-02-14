@@ -1,0 +1,15 @@
+[package]
+name = "parquet-sink-dedicated-exec-repro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrow = "54.1.0"
+arrow-schema = "54.1.0"
+async-trait = "0.1.86"
+bytes = "1.10.0"
+datafusion = "45.0.0"
+futures = "0.3.31"
+object_store = "0.11.2"
+tokio = { version = "1.43.0", features = ["full"] }
+tokio-stream = "0.1.17"

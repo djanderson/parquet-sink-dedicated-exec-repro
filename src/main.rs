@@ -19,14 +19,14 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dotenvy::dotenv;
 use futures::TryStreamExt as _;
+use object_store::aws::AmazonS3Builder;
+use object_store::ObjectStore;
 use tonic::transport::Server;
 use tonic::{Request, Status};
 
 use crate::dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
-use crate::mock_store::MockStore;
 
 mod dedicated_executor;
-mod mock_store;
 
 pub struct FlightSql {
     session: SessionState,
@@ -117,7 +117,16 @@ impl FlightSqlService for FlightSql {
 async fn main() {
     dotenv().unwrap();
     let exec = DedicatedExecutorBuilder::new().build();
-    let store = MockStore::create().await;
+    let store: Arc<dyn ObjectStore> = Arc::new(
+        AmazonS3Builder::new()
+            .with_endpoint(format!("http://localhost:9000"))
+            .with_allow_http(true)
+            .with_bucket_name(env("BUCKET_NAME"))
+            .with_access_key_id(env("ACCESS_KEY"))
+            .with_secret_access_key(env("SECRET_KEY"))
+            .build()
+            .unwrap(),
+    );
     let io_store = exec.wrap_object_store_for_io(store);
 
     let config =
@@ -148,4 +157,9 @@ async fn main() {
         .serve(addr)
         .await
         .unwrap();
+}
+
+// Get an env var or panic.
+fn env(var: &str) -> String {
+    std::env::var(var).expect(&format!("{var} env var must be set"))
 }

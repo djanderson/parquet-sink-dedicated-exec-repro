@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
-use arrow::array as arrow_array;
-use datafusion::common::record_batch;
+use arrow::ipc::convert::try_schema_from_flatbuffer_bytes;
+use arrow_flight::decode::FlightRecordBatchStream;
+use arrow_flight::flight_service_server::FlightServiceServer;
+use arrow_flight::sql::server::{FlightSqlService, PeekableFlightDataStream};
+use arrow_flight::sql::{CommandStatementIngest, SqlInfo};
 use datafusion::datasource::file_format::parquet::ParquetSink;
 use datafusion::datasource::listing::ListingTableUrl;
 use datafusion::datasource::physical_plan::{FileSink, FileSinkConfig};
+use datafusion::error::DataFusionError;
 use datafusion::execution::object_store::{
     DefaultObjectStoreRegistry, ObjectStoreRegistry as _, ObjectStoreUrl,
 };
@@ -13,46 +17,69 @@ use datafusion::execution::{SendableRecordBatchStream, SessionState, SessionStat
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 use dotenvy::dotenv;
-use hello_world::greeter_server::{Greeter, GreeterServer};
-use hello_world::{HelloReply, HelloRequest};
+use futures::TryStreamExt as _;
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Status};
 
-pub mod hello_world {
-    tonic::include_proto!("helloworld");
-}
+use crate::dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 
-pub struct Service {
+mod dedicated_executor;
+
+pub struct FlightSql {
     session: SessionState,
     exec: DedicatedExecutor,
 }
 
 #[tonic::async_trait]
-impl Greeter for Service {
-    async fn say_hello(
+impl FlightSqlService for FlightSql {
+    type FlightService = Self;
+
+    async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {
+        unimplemented!()
+    }
+
+    async fn do_put_statement_ingest(
         &self,
-        request: Request<HelloRequest>,
-    ) -> Result<Response<HelloReply>, Status> {
+        ticket: CommandStatementIngest,
+        request: Request<PeekableFlightDataStream>,
+    ) -> tonic::Result<i64> {
         println!("Got a request from {:?}", request.remote_addr());
 
         let ctx = SessionContext::new_with_state(self.session.clone());
+        let mut flight_data_stream = request.into_inner();
 
-        let batch = record_batch!(("col", Int32, vec![1, 2, 3])).unwrap();
-        let schema = batch.schema();
-        let stream_adapter =
-            RecordBatchStreamAdapter::new(batch.schema(), futures::stream::iter(vec![Ok(batch)]));
-        let stream: SendableRecordBatchStream = Box::pin(stream_adapter);
+        // Extract flight descriptor out of first FlightData
+        let first_flight_data = flight_data_stream
+            .peek()
+            .await
+            .expect("first flight data available at this point")
+            .as_ref()
+            .map_err(|e| Status::failed_precondition(format!("Failed to read FlightData: {e}")))?;
+
+        let schema = Arc::new(
+            try_schema_from_flatbuffer_bytes(&first_flight_data.data_header).map_err(|e| {
+                Status::invalid_argument(format!("Missing schema in first message: {e}"))
+            })?,
+        );
+
+        let path = format!(
+            "{}/{}/{}.parquet",
+            ticket.catalog(),
+            ticket.schema(),
+            ticket.table
+        );
+        let table_path = ListingTableUrl::parse(format!("/{}", path))
+            .map_err(|e| Status::internal(format!("invalid table url {path}: {e}")))?;
 
         // Configure sink
         let file_sink_config = FileSinkConfig {
             object_store_url: ObjectStoreUrl::local_filesystem(),
             file_groups: vec![],
-            table_paths: vec![ListingTableUrl::parse("/test.parquet").unwrap()],
-            output_schema: schema,
+            table_paths: vec![table_path],
+            output_schema: schema.clone(),
             table_partition_cols: vec![],
             insert_op: InsertOp::Overwrite,
             keep_partition_by_columns: false,
@@ -61,20 +88,28 @@ impl Greeter for Service {
         let table_options = Default::default();
         let data_sink = ParquetSink::new(file_sink_config, table_options);
 
+        let record_batch_stream =
+            //FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
+            FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
+
+        // Wrap Arrow Flight stream of record batches in DataFusion adapter
+        let stream: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
+            schema,
+            record_batch_stream.map_err(|e| DataFusionError::External(Box::new(e))),
+        ));
+
         // Execute write on dedicated runtime
-        self.exec
+        println!("writing data to object store");
+        let rows_written = self
+            .exec
             .spawn(async move { data_sink.write_all(stream, &ctx.task_ctx()).await.unwrap() })
             .await
             .unwrap();
+        println!("wrote {rows_written} rows");
 
-        self.exec.join().await;
+        //self.exec.join().await;
 
-        println!("Test completed successfully.");
-
-        let reply = hello_world::HelloReply {
-            message: format!("Hello {}!", request.into_inner().name),
-        };
-        Ok(Response::new(reply))
+        Ok(rows_written as i64)
     }
 }
 
@@ -112,12 +147,13 @@ async fn main() {
         .build();
 
     let addr = "[::1]:50051".parse().unwrap();
-    let svc = Service { session, exec };
+    let flight_sql_svc = FlightServiceServer::new(FlightSql { session, exec })
+        .max_decoding_message_size(64 * 1024 * 1024);
 
     println!("Service listening on {}", addr);
 
     Server::builder()
-        .add_service(GreeterServer::new(svc))
+        .add_service(flight_sql_svc)
         .serve(addr)
         .await
         .unwrap();

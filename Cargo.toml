@@ -2,6 +2,7 @@
 name = "parquet-sink-dedicated-exec-repro"
 version = "0.1.0"
 edition = "2021"
+default-run = "parquet-sink-dedicated-exec-repro"
 
 [lib]
 name = "dedicated_executor"

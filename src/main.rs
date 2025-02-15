@@ -1,3 +1,4 @@
+use std::future;
 use std::sync::Arc;
 
 use arrow::ipc::convert::try_schema_from_flatbuffer_bytes;
@@ -18,7 +19,7 @@ use datafusion::logical_expr::dml::InsertOp;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dotenvy::dotenv;
-use futures::TryStreamExt as _;
+use futures::{StreamExt as _, TryStreamExt as _};
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
 use tonic::transport::Server;
@@ -64,6 +65,13 @@ impl FlightSqlService for FlightSql {
                 Status::invalid_argument(format!("Missing schema in first message: {e}"))
             })?,
         );
+
+        // Just print which flight data packet we're processing.
+        let flight_data_stream = flight_data_stream.scan(0, |n, fd| {
+            println!("processing FlightData # {n}");
+            *n += 1;
+            future::ready(Some(fd))
+        });
 
         let path = format!(
             "{}/{}/{}.parquet",

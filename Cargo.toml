@@ -3,6 +3,10 @@ name = "parquet-sink-dedicated-exec-repro"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "dedicated_executor"
+path = "src/dedicated_executor.rs"
+
 [dependencies]
 arrow = "54.1.0"
 arrow-schema = "54.1.0"
@@ -12,5 +16,10 @@ datafusion = "45.0.0"
 dotenvy = "0.15.7"
 futures = "0.3.31"
 object_store = { version = "0.11.2", features = ["aws"] }
+prost = "0.13.5"
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-stream = "0.1.17"
+tonic = "0.12.3"
+
+[build-dependencies]
+tonic-build = "0.12.3"

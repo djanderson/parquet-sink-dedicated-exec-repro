@@ -25,12 +25,15 @@ use object_store::ObjectStore;
 use tonic::transport::Server;
 use tonic::{Request, Status};
 
+#[cfg(feature = "dedicated-executor")]
 use crate::dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 
+#[cfg(feature = "dedicated-executor")]
 mod dedicated_executor;
 
 pub struct FlightSql {
     session: SessionState,
+    #[cfg(feature = "dedicated-executor")]
     exec: DedicatedExecutor,
 }
 
@@ -107,11 +110,15 @@ impl FlightSqlService for FlightSql {
 
         // Execute write on dedicated runtime
         println!("writing data to object store");
+        #[cfg(feature = "dedicated-executor")]
         let rows_written = self
             .exec
             .spawn(async move { data_sink.write_all(stream, &ctx.task_ctx()).await.unwrap() })
             .await
             .unwrap();
+        #[cfg(not(feature = "dedicated-executor"))]
+        let rows_written = data_sink.write_all(stream, &ctx.task_ctx()).await.unwrap();
+
         println!("wrote {rows_written} rows");
 
         //self.exec.join().await;
@@ -123,6 +130,7 @@ impl FlightSqlService for FlightSql {
 #[tokio::main]
 async fn main() {
     dotenv().unwrap();
+    #[cfg(feature = "dedicated-executor")]
     let exec = DedicatedExecutorBuilder::new().build();
     let store: Arc<dyn ObjectStore> = Arc::new(
         AmazonS3Builder::new()
@@ -134,13 +142,14 @@ async fn main() {
             .build()
             .unwrap(),
     );
-    let io_store = exec.wrap_object_store_for_io(store);
+    #[cfg(feature = "dedicated-executor")]
+    let store = exec.wrap_object_store_for_io(store);
 
     let config =
         SessionConfig::new().set_str("datafusion.execution.parquet.compression", "zstd(19)");
 
     let object_store_registery = Arc::new(DefaultObjectStoreRegistry::default());
-    object_store_registery.register_store(ObjectStoreUrl::local_filesystem().as_ref(), io_store);
+    object_store_registery.register_store(ObjectStoreUrl::local_filesystem().as_ref(), store);
 
     let runtime_env = RuntimeEnvBuilder::new()
         .with_object_store_registry(object_store_registery)
@@ -154,8 +163,12 @@ async fn main() {
         .build();
 
     let addr = "[::1]:50051".parse().unwrap();
-    let flight_sql_svc = FlightServiceServer::new(FlightSql { session, exec })
-        .max_decoding_message_size(64 * 1024 * 1024);
+    let flight_sql_svc = FlightServiceServer::new(FlightSql {
+        session,
+        #[cfg(feature = "dedicated-executor")]
+        exec,
+    })
+    .max_decoding_message_size(64 * 1024 * 1024);
 
     println!("Service listening on {}", addr);
 

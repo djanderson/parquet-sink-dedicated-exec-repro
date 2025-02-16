@@ -41,3 +41,16 @@ Results:
 - the issue _is_ triggered above a certain threshold of data or record batches... may be system dependent?
   Is it crossing a threshold for datafusion to start parallelizing? Is it crossing some threshold of executor usage
   such that tokio spawns new workers or moves things between workers or...?
+
+## Running without dedicated executor
+
+Incidentally, by disabling the dedicated executor, this repo also demonstrates the problem we're looking to solve in the first place:
+
+1. Disable the `dedicated-executor` feature (a default feature) on the server: `cargo run --no-default-features`
+2. Run the client. On my machine, this survived much longer than the decicated executor, but consistenly displayed a timeout between client and server with
+   `cargo run --bin client 5000`.
+3. This even shows a failure with both server and client running in release mode: `cargo run --no-default-features --release`, and for release mode I needed
+   to transfer a bit more data with `cargo run --release --bin client 50000`, however if this command succeeded it would result in ~3.5GB parquet file in the
+   object store, so nothing outrageous.
+
+The symptoms in both cases are a a client timeout while waiting for a server response, and a failed upload to minio (complete data loss).

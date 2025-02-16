@@ -30,6 +30,7 @@ use crate::dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 
 #[cfg(feature = "dedicated-executor")]
 mod dedicated_executor;
+mod localstack;
 
 pub struct FlightSql {
     session: SessionState,
@@ -130,15 +131,22 @@ impl FlightSqlService for FlightSql {
 #[tokio::main]
 async fn main() {
     dotenv().unwrap();
+
+    println!("Starting localstack object store");
+    let localstack = localstack::localstack_container().await;
+    let localstack_host = localstack.get_host().await.unwrap();
+    let localstack_port = localstack.get_host_port_ipv4(4566).await.unwrap();
+
     #[cfg(feature = "dedicated-executor")]
     let exec = DedicatedExecutorBuilder::new().build();
+
     let store: Arc<dyn ObjectStore> = Arc::new(
         AmazonS3Builder::new()
-            .with_endpoint(format!("http://localhost:9000"))
+            .with_endpoint(format!("http://{}:{}", localstack_host, localstack_port))
             .with_allow_http(true)
-            .with_bucket_name(env("BUCKET_NAME"))
-            .with_access_key_id(env("ACCESS_KEY"))
-            .with_secret_access_key(env("SECRET_KEY"))
+            .with_bucket_name("warehouse")
+            .with_access_key_id("user")
+            .with_secret_access_key("password")
             .build()
             .unwrap(),
     );
@@ -177,9 +185,4 @@ async fn main() {
         .serve(addr)
         .await
         .unwrap();
-}
-
-// Get an env var or panic.
-fn env(var: &str) -> String {
-    std::env::var(var).expect(&format!("{var} env var must be set"))
 }

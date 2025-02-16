@@ -27,7 +27,7 @@ Incidentally, by disabling the dedicated executor, this repo also demonstrates t
    `cargo run --bin client 5000`.
    ![image](https://github.com/user-attachments/assets/55385f67-7120-41c4-9cb7-7b3686c798a9)
 
-4. This even shows a failure with both server and client running in release mode: `cargo run --no-default-features --release`, and for release mode I needed
+3. This even shows a failure with both server and client running in release mode: `cargo run --no-default-features --release`, and for release mode I needed
    to transfer a bit more data with `cargo run --release --bin client 50000`, however if this command succeeded it would result in ~3.5GB parquet file in the
    object store, so nothing outrageous.
    ![image](https://github.com/user-attachments/assets/1ddb0cea-c5e9-4bf3-b2ef-9a2fcd306375)

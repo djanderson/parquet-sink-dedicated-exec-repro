@@ -58,7 +58,7 @@ async fn main() {
     }
 }
 
-// Generate a record batch with `cols` columns named "colN" (1-indexed), with random f64 values.
+// Generate a record batch with `cols` columns named "colN" (0-indexed), with random f64 values.
 fn record_batch(cols: usize, rows: usize) -> RecordBatch {
     let schema = Arc::new(Schema::new(
         (0..cols)

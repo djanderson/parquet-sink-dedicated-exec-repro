@@ -1,5 +1,7 @@
 # DataFusion dedicated executor investigation
 
+This is a reproducer for https://github.com/apache/datafusion/pull/14286#issuecomment-2654795222.
+
 ## Quickstart
 
 1. Run a minio container

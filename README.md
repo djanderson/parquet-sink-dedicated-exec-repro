@@ -14,17 +14,20 @@ docker run \
    -v ${HOME}/minio/data:/data \
    quay.io/minio/minio server /data --console-address ":9001"
    ```
-1. Log into http://localhost:9000 with `admin` and `changme` and create a bucket and API key
-   TODO: insert screenshot
-1. Create a .env file with the following contents, filled in:
+2. Log into http://localhost:9000 with `admin` and `changme` and create a **bucket** and **API key**
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/e71ea631-37e1-407a-b26c-5137780ff0fd" width="200">
+</p>
+
+3. Create an `.env` file with the following contents, filled in:
 ```sh
 BUCKET_NAME=
 ACCESS_KEY=
 SECRET_KEY=
 ```
-1. Run the server `cargo run`
-1. Trigger the bug with `cargo run client` in a different terminal
-   This default to 500 record batches which triggers the bug on my system. You can send different numbers of record batches with `cargo run client <N_BATCHES>`
+4. Run the server `cargo run`
+5. Trigger the bug with `cargo run client` in a different terminal. This default to 500 record batches which triggers the bug on my system. You can send different numbers of record batches with `cargo run client <N_BATCHES>`
 
 - [ ] Can we trigger this without the networking object store? LocalFileSystem or even Mock? -> it doesn't seem so.
 

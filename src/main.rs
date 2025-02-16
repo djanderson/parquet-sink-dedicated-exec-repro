@@ -97,7 +97,6 @@ impl FlightSqlService for FlightSql {
         let data_sink = ParquetSink::new(file_sink_config, table_options);
 
         let record_batch_stream =
-            //FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
             FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
 
         // Wrap Arrow Flight stream of record batches in DataFusion adapter

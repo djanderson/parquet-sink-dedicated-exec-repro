@@ -49,8 +49,12 @@ Incidentally, by disabling the dedicated executor, this repo also demonstrates t
 1. Disable the `dedicated-executor` feature (a default feature) on the server: `cargo run --no-default-features`
 2. Run the client. On my machine, this survived much longer than the decicated executor, but consistenly displayed a timeout between client and server with
    `cargo run --bin client 5000`.
-3. This even shows a failure with both server and client running in release mode: `cargo run --no-default-features --release`, and for release mode I needed
+   ![image](https://github.com/user-attachments/assets/55385f67-7120-41c4-9cb7-7b3686c798a9)
+
+4. This even shows a failure with both server and client running in release mode: `cargo run --no-default-features --release`, and for release mode I needed
    to transfer a bit more data with `cargo run --release --bin client 50000`, however if this command succeeded it would result in ~3.5GB parquet file in the
    object store, so nothing outrageous.
+   ![image](https://github.com/user-attachments/assets/1ddb0cea-c5e9-4bf3-b2ef-9a2fcd306375)
+
 
 The symptoms in both cases are a a client timeout while waiting for a server response, and a failed upload to minio (complete data loss).

@@ -62,7 +62,7 @@ async fn main() {
 fn record_batch(cols: usize, rows: usize) -> RecordBatch {
     let schema = Arc::new(Schema::new(
         (0..cols)
-            .map(|i| Arc::new(Field::new(&format!("col{}", i), DataType::Float64, false)))
+            .map(|i| Arc::new(Field::new(format!("col{}", i), DataType::Float64, false)))
             .collect::<Vec<_>>(),
     ));
 

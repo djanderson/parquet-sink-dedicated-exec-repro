@@ -1,17 +1,14 @@
 use std::future;
 use std::sync::Arc;
 
-use arrow::array::RecordBatch;
 use arrow::ipc::convert::try_schema_from_flatbuffer_bytes;
 use arrow_flight::decode::FlightRecordBatchStream;
-use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::server::{FlightSqlService, PeekableFlightDataStream};
 use arrow_flight::sql::{CommandStatementIngest, SqlInfo};
 #[cfg(feature = "dedicated-executor")]
 use dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 use dotenvy::dotenv;
-use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
@@ -75,19 +72,11 @@ impl FlightSqlService for FlightSql {
             FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
 
         #[cfg(feature = "dedicated-executor")]
-        let rows_written = {
-            let stream = self
-                .exec
-                .run_cpu_stream(record_batch_stream, |job_error| {
-                    let job_error: datafusion::common::error::GenericError = Box::new(job_error);
-                    FlightError::from_external_error(job_error)
-                })
-                .boxed();
-            self.exec
-                .spawn(async move { write_stream(writer, stream).await })
-                .await
-                .unwrap()
-        };
+        let rows_written = self
+            .exec
+            .spawn(async move { write_stream(writer, record_batch_stream).await })
+            .await
+            .unwrap();
         #[cfg(not(feature = "dedicated-executor"))]
         let rows_written = write_stream(writer, record_batch_stream).await;
 
@@ -97,7 +86,7 @@ impl FlightSqlService for FlightSql {
 
 async fn write_stream(
     mut writer: AsyncArrowWriter<ParquetObjectWriter>,
-    mut stream: BoxStream<'_, Result<RecordBatch, FlightError>>,
+    mut stream: FlightRecordBatchStream,
 ) -> usize {
     let mut rows_written = 0;
     while let Some(record_batch) = stream.next().await {

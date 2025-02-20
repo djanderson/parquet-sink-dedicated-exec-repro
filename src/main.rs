@@ -6,6 +6,7 @@ use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::server::{FlightSqlService, PeekableFlightDataStream};
 use arrow_flight::sql::{CommandStatementIngest, SqlInfo};
+#[cfg(feature = "dedicated-executor")]
 use dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 use dotenvy::dotenv;
 use futures::{StreamExt, TryStreamExt};
@@ -16,12 +17,13 @@ use parquet::arrow::AsyncArrowWriter;
 use tonic::transport::Server;
 use tonic::{Request, Status};
 
+#[cfg(feature = "dedicated-executor")]
 mod dedicated_executor;
 mod localstack;
 
-#[allow(unused)]
 pub struct FlightSql {
     store: Arc<dyn ObjectStore>,
+    #[cfg(feature = "dedicated-executor")]
     exec: DedicatedExecutor,
 }
 
@@ -109,7 +111,7 @@ async fn main() {
     let localstack_host = localstack.get_host().await.unwrap();
     let localstack_port = localstack.get_host_port_ipv4(4566).await.unwrap();
 
-    #[allow(unused)]
+    #[cfg(feature = "dedicated-executor")]
     let exec = DedicatedExecutorBuilder::new().build();
 
     let store: Arc<dyn ObjectStore> = Arc::new(
@@ -126,7 +128,11 @@ async fn main() {
     let store = exec.wrap_object_store_for_io(store);
 
     let addr = "[::1]:50051".parse().unwrap();
-    let flight_sql_svc = FlightServiceServer::new(FlightSql { store, exec });
+    let flight_sql_svc = FlightServiceServer::new(FlightSql {
+        store,
+        #[cfg(feature = "dedicated-executor")]
+        exec,
+    });
 
     println!("Service listening on {}", addr);
 

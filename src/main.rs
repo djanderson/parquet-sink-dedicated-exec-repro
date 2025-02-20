@@ -6,35 +6,22 @@ use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::server::{FlightSqlService, PeekableFlightDataStream};
 use arrow_flight::sql::{CommandStatementIngest, SqlInfo};
-use datafusion::datasource::file_format::parquet::ParquetSink;
-use datafusion::datasource::listing::ListingTableUrl;
-use datafusion::datasource::physical_plan::{FileSink, FileSinkConfig};
-use datafusion::error::DataFusionError;
-use datafusion::execution::object_store::{
-    DefaultObjectStoreRegistry, ObjectStoreRegistry as _, ObjectStoreUrl,
-};
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::execution::{SendableRecordBatchStream, SessionState, SessionStateBuilder};
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use datafusion::prelude::{SessionConfig, SessionContext};
+use dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
 use dotenvy::dotenv;
-use futures::{StreamExt as _, TryStreamExt as _};
+use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::ObjectStore;
+use parquet::arrow::async_writer::ParquetObjectWriter;
+use parquet::arrow::AsyncArrowWriter;
 use tonic::transport::Server;
 use tonic::{Request, Status};
 
-#[cfg(feature = "dedicated-executor")]
-use crate::dedicated_executor::{DedicatedExecutor, DedicatedExecutorBuilder};
-
-#[cfg(feature = "dedicated-executor")]
 mod dedicated_executor;
 mod localstack;
 
+#[allow(unused)]
 pub struct FlightSql {
-    session: SessionState,
-    #[cfg(feature = "dedicated-executor")]
+    store: Arc<dyn ObjectStore>,
     exec: DedicatedExecutor,
 }
 
@@ -53,7 +40,6 @@ impl FlightSqlService for FlightSql {
     ) -> tonic::Result<i64> {
         println!("Got a request from {:?}", request.remote_addr());
 
-        let ctx = SessionContext::new_with_state(self.session.clone());
         let mut flight_data_stream = request.into_inner();
 
         // Extract flight descriptor out of first FlightData
@@ -77,55 +63,41 @@ impl FlightSqlService for FlightSql {
             future::ready(Some(fd))
         });
 
-        let path = format!(
-            "{}/{}/{}.parquet",
-            ticket.catalog(),
-            ticket.schema(),
-            ticket.table
-        );
-        let table_path = ListingTableUrl::parse(format!("/{}", path))
-            .map_err(|e| Status::internal(format!("invalid table url {path}: {e}")))?;
-
-        // Configure sink
-        let file_sink_config = FileSinkConfig {
-            object_store_url: ObjectStoreUrl::local_filesystem(),
-            file_groups: vec![],
-            table_paths: vec![table_path],
-            output_schema: schema.clone(),
-            table_partition_cols: vec![],
-            insert_op: InsertOp::Overwrite,
-            keep_partition_by_columns: false,
-            file_extension: String::from("parquet"),
-        };
-        let table_options = Default::default();
-        let data_sink = ParquetSink::new(file_sink_config, table_options);
-
+        let path = format!("{}.parquet", ticket.table);
+        let object_store_writer = ParquetObjectWriter::new(self.store.clone(), path.into());
+        let writer = AsyncArrowWriter::try_new(object_store_writer, schema, None).unwrap();
         let record_batch_stream =
             FlightRecordBatchStream::new_from_flight_data(flight_data_stream.map_err(|e| e.into()));
 
-        // Wrap Arrow Flight stream of record batches in DataFusion adapter
-        let stream: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
-            schema,
-            record_batch_stream.map_err(|e| DataFusionError::External(Box::new(e))),
-        ));
-
-        // Execute write on dedicated runtime
-        println!("writing data to object store");
         #[cfg(feature = "dedicated-executor")]
         let rows_written = self
             .exec
-            .spawn(async move { data_sink.write_all(stream, &ctx.task_ctx()).await.unwrap() })
+            .spawn(async move { write_stream(writer, record_batch_stream).await })
             .await
             .unwrap();
         #[cfg(not(feature = "dedicated-executor"))]
-        let rows_written = data_sink.write_all(stream, &ctx.task_ctx()).await.unwrap();
-
-        println!("wrote {rows_written} rows");
-
-        //self.exec.join().await;
+        let rows_written = write_stream(writer, record_batch_stream).await;
 
         Ok(rows_written as i64)
     }
+}
+
+async fn write_stream(
+    mut writer: AsyncArrowWriter<ParquetObjectWriter>,
+    mut stream: FlightRecordBatchStream,
+) -> usize {
+    let mut rows_written = 0;
+    while let Some(record_batch) = stream.next().await {
+        match record_batch {
+            Ok(rb) => {
+                writer.write(&rb).await.unwrap();
+                rows_written += rb.num_rows();
+            }
+            Err(e) => eprintln!("error: in record batch stream: {e}"),
+        }
+    }
+    writer.close().await.unwrap();
+    rows_written
 }
 
 #[tokio::main]
@@ -137,7 +109,7 @@ async fn main() {
     let localstack_host = localstack.get_host().await.unwrap();
     let localstack_port = localstack.get_host_port_ipv4(4566).await.unwrap();
 
-    #[cfg(feature = "dedicated-executor")]
+    #[allow(unused)]
     let exec = DedicatedExecutorBuilder::new().build();
 
     let store: Arc<dyn ObjectStore> = Arc::new(
@@ -153,30 +125,8 @@ async fn main() {
     #[cfg(feature = "dedicated-executor")]
     let store = exec.wrap_object_store_for_io(store);
 
-    let config =
-        SessionConfig::new().set_str("datafusion.execution.parquet.compression", "zstd(19)");
-
-    let object_store_registery = Arc::new(DefaultObjectStoreRegistry::default());
-    object_store_registery.register_store(ObjectStoreUrl::local_filesystem().as_ref(), store);
-
-    let runtime_env = RuntimeEnvBuilder::new()
-        .with_object_store_registry(object_store_registery)
-        .build_arc()
-        .unwrap();
-
-    let session = SessionStateBuilder::new()
-        .with_config(config)
-        .with_runtime_env(runtime_env)
-        .with_default_features()
-        .build();
-
     let addr = "[::1]:50051".parse().unwrap();
-    let flight_sql_svc = FlightServiceServer::new(FlightSql {
-        session,
-        #[cfg(feature = "dedicated-executor")]
-        exec,
-    })
-    .max_decoding_message_size(64 * 1024 * 1024);
+    let flight_sql_svc = FlightServiceServer::new(FlightSql { store, exec });
 
     println!("Service listening on {}", addr);
 

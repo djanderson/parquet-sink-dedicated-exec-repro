@@ -18,6 +18,17 @@ Results:
   Is it crossing a threshold for datafusion to start parallelizing? Is it crossing some threshold of executor usage
   such that tokio spawns new workers or moves things between workers or...?
 
+## Running tokio console
+
+This application is instrumented for tokio console (`cargo install --locked tokio-console`). You need to put the following in `.cargo/config.toml`:
+
+```toml
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
+```
+
+and, after running the server, in another terminal, do `tokio-console`.
+
 ## Running without dedicated executor
 
 Incidentally, by disabling the dedicated executor, this repo also demonstrates the problem we're looking to solve in the first place:

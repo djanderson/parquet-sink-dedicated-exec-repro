@@ -105,6 +105,7 @@ async fn write_stream(
 #[tokio::main]
 async fn main() {
     dotenv().unwrap();
+    console_subscriber::init();
 
     println!("Starting localstack object store");
     let localstack = localstack::localstack_container().await;

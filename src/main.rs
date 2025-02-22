@@ -132,7 +132,7 @@ async fn main() {
     let flight_sql_svc = FlightServiceServer::new(FlightSql {
         store,
         #[cfg(feature = "dedicated-executor")]
-        exec,
+        exec: exec.clone(),
     });
 
     println!("Service listening on {}", addr);
@@ -142,4 +142,6 @@ async fn main() {
         .serve(addr)
         .await
         .unwrap();
+
+    exec.join().await;
 }

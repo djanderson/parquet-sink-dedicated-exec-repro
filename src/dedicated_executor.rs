@@ -40,7 +40,7 @@ use object_store::{
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::Notify;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::{self, JoinHandle, JoinSet};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Create a [`DedicatedExecutorBuilder`] from a tokio [`Builder`]
@@ -826,10 +826,27 @@ impl IoMultipartUpload {
 #[async_trait]
 impl MultipartUpload for IoMultipartUpload {
     fn put_part(&mut self, data: PutPayload) -> UploadPart {
-        self.inner
-            .as_mut()
-            .expect("paths that take put inner back")
-            .put_part(data)
+        // because we are running the task on a different runtime, we
+        // can't send references to &self. Thus take out of self.inner
+        // to run on io thread
+        let mut inner = self.inner.take().expect("paths that take put inner back");
+        let exec = self.dedicated_executor.clone();
+
+        // Spawn the async task on the dedicated executor
+        let (inner, result) = task::block_in_place(move || {
+            let lock_guard = exec.state.read().expect("lock not poisened");
+            let handle = lock_guard.handle.as_ref().expect("the thing");
+            handle.block_on(async {
+                exec.spawn_io(async move {
+                    let result = inner.as_mut().put_part(data);
+                    (inner, result)
+                })
+                .await
+            })
+        });
+
+        self.inner = Some(inner);
+        result
     }
 
     async fn complete(&mut self) -> object_store::Result<PutResult> {

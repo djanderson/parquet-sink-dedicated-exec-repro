@@ -45,3 +45,21 @@ Incidentally, by disabling the dedicated executor, this repo also demonstrates t
 
 
 The symptoms in both cases are a a client timeout while waiting for a server response, and a failed upload to minio (complete data loss).
+
+Below is the relevant section of the backtrace I get _if I `.enable_time()` on the tokio runtime Builder!_ Otherwise I get a significantly less useful backtrace about timers.
+
+```rust
+thread 'tokio-runtime-worker' panicked at /Users/dja/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tokio-1.43.0/src/net/tcp/stream.rs:160:18:
+A Tokio 1.x context was found, but IO is disabled. Call `enable_io` on the runtime builder to enable IO.
+stack backtrace:
+...
+  56: object_store::client::retry::RetryableRequest::send::{{closure}}
+             at /Users/dja/.cargo/registry/src/index.crates.io-6f17d22bba15001f/object_store-0.11.2/src/client/retry.rs:277:48
+  57: object_store::aws::client::Request::send::{{closure}}
+             at /Users/dja/.cargo/registry/src/index.crates.io-6f17d22bba15001f/object_store-0.11.2/src/aws/client.rs:428:14
+  58: object_store::aws::client::S3Client::put_part::{{closure}}
+             at /Users/dja/.cargo/registry/src/index.crates.io-6f17d22bba15001f/object_store-0.11.2/src/aws/client.rs:678:39
+  59: <object_store::aws::S3MultiPartUpload as object_store::upload::MultipartUpload>::put_part::{{closure}}
+             at /Users/dja/.cargo/registry/src/index.crates.io-6f17d22bba15001f/object_store-0.11.2/src/aws/mod.rs:409:18
+  60: <core::pin::Pin<P> as core::future::future::Future>::poll
+```

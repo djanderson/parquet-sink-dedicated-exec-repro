@@ -835,13 +835,19 @@ impl MultipartUpload for IoMultipartUpload {
         // Spawn the async task on the dedicated executor
         let (inner, result) = task::block_in_place(move || {
             let lock_guard = exec.state.read().expect("lock not poisened");
-            let handle = lock_guard.handle.as_ref().expect("the thing");
-            handle.block_on(async {
-                exec.spawn_io(async move {
-                    let result = inner.as_mut().put_part(data);
-                    (inner, result)
-                })
-                .await
+            let exec_handle = lock_guard.handle.as_ref().expect("the thing");
+            exec_handle.block_on(async {
+                let io_handle = IO_RUNTIME
+                    .with_borrow(|h| h.clone())
+                    .expect("No IO runtime registered");
+                {
+                    exec.spawn_io(async move {
+                        let _guard = io_handle.enter();
+                        let result = inner.as_mut().put_part(data);
+                        (inner, result)
+                    })
+                    .await
+                }
             })
         });
 

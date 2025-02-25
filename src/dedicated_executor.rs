@@ -40,7 +40,7 @@ use object_store::{
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::Notify;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::task::{self, JoinHandle, JoinSet};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Create a [`DedicatedExecutorBuilder`] from a tokio [`Builder`]
@@ -811,7 +811,6 @@ impl ObjectStore for IoObjectStore {
 #[derive(Debug)]
 struct IoMultipartUpload {
     dedicated_executor: DedicatedExecutor,
-    /// Inner upload (needs to be an option so we can send in closure)
     inner: Option<Box<dyn MultipartUpload>>,
 }
 impl IoMultipartUpload {
@@ -826,31 +825,8 @@ impl IoMultipartUpload {
 #[async_trait]
 impl MultipartUpload for IoMultipartUpload {
     fn put_part(&mut self, data: PutPayload) -> UploadPart {
-        // because we are running the task on a different runtime, we
-        // can't send references to &self. Thus take out of self.inner
-        // to run on io thread
         let mut inner = self.inner.take().expect("paths that take put inner back");
-        let exec = self.dedicated_executor.clone();
-
-        // Spawn the async task on the dedicated executor
-        let (inner, result) = task::block_in_place(move || {
-            let lock_guard = exec.state.read().expect("lock not poisened");
-            let exec_handle = lock_guard.handle.as_ref().expect("the thing");
-            exec_handle.block_on(async {
-                let io_handle = IO_RUNTIME
-                    .with_borrow(|h| h.clone())
-                    .expect("No IO runtime registered");
-                {
-                    exec.spawn_io(async move {
-                        let _guard = io_handle.enter();
-                        let result = inner.as_mut().put_part(data);
-                        (inner, result)
-                    })
-                    .await
-                }
-            })
-        });
-
+        let result = DedicatedExecutor::spawn_io_static(inner.put_part(data)).boxed();
         self.inner = Some(inner);
         result
     }

@@ -25,10 +25,10 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use datafusion::common::error::GenericError;
 use datafusion::common::DataFusionError;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use datafusion::common::error::GenericError;
 use datafusion::physical_plan::SendableRecordBatchStream;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use futures::future::{BoxFuture, Shared};
 use futures::stream::BoxStream;
 use futures::{Future, FutureExt, Stream, StreamExt, TryFutureExt};
@@ -38,8 +38,8 @@ use object_store::{
     PutMultipartOpts, PutOptions, PutPayload, PutResult, UploadPart,
 };
 use tokio::runtime::{Builder, Handle};
-use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::Notify;
+use tokio::sync::oneshot::error::RecvError;
 use tokio::task::{self, JoinHandle, JoinSet};
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -152,7 +152,7 @@ impl DedicatedExecutor {
     /// UNLIKE [`tokio::task::spawn`], the returned future is **cancelled** when
     /// it is dropped. Thus, you need ensure the returned future lives until it
     /// completes (call `await`) or you wish to cancel it.
-    pub fn spawn<T>(&self, task: T) -> impl Future<Output = Result<T::Output, JobError>>
+    pub fn spawn<T>(&self, task: T) -> impl Future<Output = Result<T::Output, JobError>> + use<T>
     where
         T: Future + Send + 'static,
         T::Output: Send + 'static,
